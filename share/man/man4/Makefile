@@ -584,7 +584,6 @@ MAN=	aac.4 \
 	tslog.4 \
 	tty.4 \
 	tun.4 \
-	twe.4 \
 	tws.4 \
 	udp.4 \
 	udplite.4 \
@@ -1042,6 +1041,7 @@ MAN+=	\
 	uled.4 \
 	ulpt.4 \
 	umass.4 \
+	umb.4 \
 	umcs.4 \
 	umct.4 \
 	umodem.4 \

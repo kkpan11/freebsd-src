@@ -46,7 +46,6 @@
 #define	DEFAULT_CD_BLOCKSIZE		2048
 
 #define	MAX_LUNS			1024
-#define	MAX_NAME_LEN			223
 #define	MAX_DATA_SEGMENT_LENGTH		(128 * 1024)
 #define	SOCKBUF_SIZE			1048576
 
@@ -349,7 +348,7 @@ void			lun_set_device_id(struct lun *lun, const char *value);
 void			lun_set_path(struct lun *lun, const char *value);
 void			lun_set_scsiname(struct lun *lun, const char *value);
 void			lun_set_serial(struct lun *lun, const char *value);
-void			lun_set_size(struct lun *lun, size_t value);
+void			lun_set_size(struct lun *lun, int64_t value);
 void			lun_set_ctl_lun(struct lun *lun, uint32_t value);
 
 struct option		*option_new(struct options *os,
@@ -387,7 +386,6 @@ void			login(struct ctld_connection *conn);
 
 void			discovery(struct ctld_connection *conn);
 
-bool			valid_iscsi_name(const char *name);
 void			set_timeout(int timeout, int fatal);
 
 #endif /* !CTLD_H */

@@ -1519,6 +1519,7 @@ pci_find_cap_method(device_t dev, device_t child, int capability,
 	pcicfgregs *cfg = &dinfo->cfg;
 	uint32_t status;
 	uint8_t ptr;
+	int cnt;
 
 	/*
 	 * Check the CAP_LIST bit of the PCI status register first.
@@ -1545,9 +1546,11 @@ pci_find_cap_method(device_t dev, device_t child, int capability,
 	ptr = pci_read_config(child, ptr, 1);
 
 	/*
-	 * Traverse the capabilities list.
+	 * Traverse the capabilities list.  Limit by total theoretical
+	 * maximum number of caps: capability needs at least id and
+	 * next registers, and any type X header cannot contain caps.
 	 */
-	while (ptr != 0) {
+	for (cnt = 0; ptr != 0 && cnt < (PCIE_REGMAX - 0x40) / 2; cnt++) {
 		if (pci_read_config(child, ptr + PCICAP_ID, 1) == capability) {
 			if (capreg != NULL)
 				*capreg = ptr;
@@ -4091,7 +4094,6 @@ pci_add_resources(device_t bus, device_t dev, int force, uint32_t prefetchmask)
 			pci_add_map(bus, dev, q->arg1, rl, force, 0);
 
 	if (cfg->intpin > 0 && PCI_INTERRUPT_VALID(cfg->intline)) {
-#ifdef __PCI_REROUTE_INTERRUPT
 		/*
 		 * Try to re-route interrupts. Sometimes the BIOS or
 		 * firmware may leave bogus values in these registers.
@@ -4099,9 +4101,6 @@ pci_add_resources(device_t bus, device_t dev, int force, uint32_t prefetchmask)
 		 * have.
 		 */
 		pci_assign_interrupt(bus, dev, 1);
-#else
-		pci_assign_interrupt(bus, dev, 0);
-#endif
 	}
 
 	if (pci_usb_takeover && pci_get_class(dev) == PCIC_SERIALBUS &&

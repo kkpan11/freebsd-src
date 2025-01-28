@@ -180,6 +180,7 @@ struct pfctl_rule {
 		struct pfctl_pool	 rpool;
 		struct pfctl_pool	 rdr;
 	};
+	struct pfctl_pool	 route;
 
 	uint64_t		 evaluations;
 	uint64_t		 packets[2];
@@ -538,5 +539,8 @@ int	pfctl_get_rulesets(struct pfctl_handle *h, const char *path, uint32_t *nr);
 int	pfctl_get_ruleset(struct pfctl_handle *h, const char *path, uint32_t nr, struct pfioc_ruleset *rs);
 typedef int (*pfctl_get_srcnode_fn)(struct pfctl_src_node*, void *);
 int	pfctl_get_srcnodes(struct pfctl_handle *h, pfctl_get_srcnode_fn fn, void *arg);
+
+int	pfctl_clear_tables(struct pfctl_handle *h, struct pfr_table *filter,
+	    int *ndel, int flags);
 
 #endif
