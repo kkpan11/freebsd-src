@@ -1269,7 +1269,6 @@ pfctl_show_rules(int dev, char *path, int opts, enum pfctl_show format,
 				errc(1, ret, "DIOCGETRULESETS");
 		}
 
-		pfctl_print_rule_counters(&rule, opts);
 		for (nr = 0; nr < mnr; ++nr) {
 			if ((ret = pfctl_get_ruleset(pfh, npath, nr, &prs)) != 0)
 				errc(1, ret, "DIOCGETRULESET");
@@ -1490,7 +1489,6 @@ pfctl_show_nat(int dev, const char *path, int opts, char *anchorname, int depth,
 				errc(1, ret, "DIOCGETRULESETS");
 		}
 
-		pfctl_print_rule_counters(&rule, opts);
 		for (nr = 0; nr < mnr; ++nr) {
 			if ((ret = pfctl_get_ruleset(pfh, npath, nr, &prs)) != 0)
 				errc(1, ret, "DIOCGETRULESET");

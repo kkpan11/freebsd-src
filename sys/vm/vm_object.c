@@ -110,8 +110,8 @@ static int old_msync;
 SYSCTL_INT(_vm, OID_AUTO, old_msync, CTLFLAG_RW, &old_msync, 0,
     "Use old (insecure) msync behavior");
 
-static int	vm_object_page_collect_flush(vm_object_t object, vm_page_t p,
-		    int pagerflags, int flags, boolean_t *allclean,
+static int	vm_object_page_collect_flush(struct pctrie_iter *pages,
+		    vm_page_t p, int pagerflags, int flags, boolean_t *allclean,
 		    boolean_t *eio);
 static boolean_t vm_object_page_remove_write(vm_page_t p, int flags,
 		    boolean_t *allclean);
@@ -1032,6 +1032,7 @@ boolean_t
 vm_object_page_clean(vm_object_t object, vm_ooffset_t start, vm_ooffset_t end,
     int flags)
 {
+	struct pctrie_iter pages;
 	vm_page_t np, p;
 	vm_pindex_t pi, tend, tstart;
 	int curgeneration, n, pagerflags;
@@ -1050,31 +1051,36 @@ vm_object_page_clean(vm_object_t object, vm_ooffset_t start, vm_ooffset_t end,
 	tend = (end == 0) ? object->size : OFF_TO_IDX(end + PAGE_MASK);
 	allclean = tstart == 0 && tend >= object->size;
 	res = TRUE;
+	vm_page_iter_init(&pages, object);
 
 rescan:
 	curgeneration = object->generation;
 
-	for (p = vm_page_find_least(object, tstart); p != NULL; p = np) {
+	for (p = vm_radix_iter_lookup_ge(&pages, tstart); p != NULL; p = np) {
 		pi = p->pindex;
 		if (pi >= tend)
 			break;
-		np = TAILQ_NEXT(p, listq);
-		if (vm_page_none_valid(p))
+		if (vm_page_none_valid(p)) {
+			np = vm_radix_iter_step(&pages);
 			continue;
-		if (vm_page_busy_acquire(p, VM_ALLOC_WAITFAIL) == 0) {
+		}
+		if (!vm_page_busy_acquire(p, VM_ALLOC_WAITFAIL)) {
+			pctrie_iter_reset(&pages);
 			if (object->generation != curgeneration &&
 			    (flags & OBJPC_SYNC) != 0)
 				goto rescan;
-			np = vm_page_find_least(object, pi);
+			np = vm_radix_iter_lookup_ge(&pages, pi);
 			continue;
 		}
 		if (!vm_object_page_remove_write(p, flags, &allclean)) {
+			np = vm_radix_iter_step(&pages);
 			vm_page_xunbusy(p);
 			continue;
 		}
 		if (object->type == OBJT_VNODE) {
-			n = vm_object_page_collect_flush(object, p, pagerflags,
+			n = vm_object_page_collect_flush(&pages, p, pagerflags,
 			    flags, &allclean, &eio);
+			pctrie_iter_reset(&pages);
 			if (eio) {
 				res = FALSE;
 				allclean = FALSE;
@@ -1103,7 +1109,7 @@ rescan:
 			n = 1;
 			vm_page_xunbusy(p);
 		}
-		np = vm_page_find_least(object, pi + n);
+		np = vm_radix_iter_lookup_ge(&pages, pi + n);
 	}
 #if 0
 	VOP_FSYNC(vp, (pagerflags & VM_PAGER_PUT_SYNC) ? MNT_WAIT : 0);
@@ -1120,37 +1126,37 @@ rescan:
 }
 
 static int
-vm_object_page_collect_flush(vm_object_t object, vm_page_t p, int pagerflags,
-    int flags, boolean_t *allclean, boolean_t *eio)
+vm_object_page_collect_flush(struct pctrie_iter *pages, vm_page_t p,
+    int pagerflags, int flags, boolean_t *allclean, boolean_t *eio)
 {
-	vm_page_t ma[2 * vm_pageout_page_count - 1], tp;
+	vm_page_t ma[2 * vm_pageout_page_count - 1];
 	int base, count, runlen;
 
 	vm_page_lock_assert(p, MA_NOTOWNED);
 	vm_page_assert_xbusied(p);
-	VM_OBJECT_ASSERT_WLOCKED(object);
 	base = nitems(ma) / 2;
 	ma[base] = p;
-	for (count = 1, tp = p; count < vm_pageout_page_count; count++) {
-		tp = vm_page_next(tp);
-		if (tp == NULL || vm_page_tryxbusy(tp) == 0)
+	for (count = 1; count < vm_pageout_page_count; count++) {
+		p = vm_radix_iter_next(pages);
+		if (p == NULL || vm_page_tryxbusy(p) == 0)
 			break;
-		if (!vm_object_page_remove_write(tp, flags, allclean)) {
-			vm_page_xunbusy(tp);
+		if (!vm_object_page_remove_write(p, flags, allclean)) {
+			vm_page_xunbusy(p);
 			break;
 		}
-		ma[base + count] = tp;
+		ma[base + count] = p;
 	}
 
-	for (tp = p; count < vm_pageout_page_count; count++) {
-		tp = vm_page_prev(tp);
-		if (tp == NULL || vm_page_tryxbusy(tp) == 0)
+	pages->index = ma[base]->pindex;
+	for (; count < vm_pageout_page_count; count++) {
+		p = vm_radix_iter_prev(pages);
+		if (p == NULL || vm_page_tryxbusy(p) == 0)
 			break;
-		if (!vm_object_page_remove_write(tp, flags, allclean)) {
-			vm_page_xunbusy(tp);
+		if (!vm_object_page_remove_write(p, flags, allclean)) {
+			vm_page_xunbusy(p);
 			break;
 		}
-		ma[--base] = tp;
+		ma[--base] = p;
 	}
 
 	vm_pageout_flush(&ma[base], count, pagerflags, nitems(ma) / 2 - base,
@@ -2275,19 +2281,21 @@ void
 vm_object_prepare_buf_pages(vm_object_t object, vm_page_t *ma_dst, int count,
     int *rbehind, int *rahead, vm_page_t *ma_src)
 {
+	struct pctrie_iter pages;
 	vm_pindex_t pindex;
 	vm_page_t m, mpred, msucc;
 
+	vm_page_iter_init(&pages, object);
 	VM_OBJECT_ASSERT_LOCKED(object);
 	if (*rbehind != 0) {
 		m = ma_src[0];
 		pindex = m->pindex;
-		mpred = TAILQ_PREV(m, pglist, listq);
+		mpred = vm_radix_iter_lookup_lt(&pages, pindex);
 		*rbehind = MIN(*rbehind,
 		    pindex - (mpred != NULL ? mpred->pindex + 1 : 0));
 		/* Stepping backward from pindex, mpred doesn't change. */
 		for (int i = 0; i < *rbehind; i++) {
-			m = vm_page_alloc_after(object, pindex - i - 1,
+			m = vm_page_alloc_after(object, &pages, pindex - i - 1,
 			    VM_ALLOC_NORMAL, mpred);
 			if (m == NULL) {
 				/* Shift the array. */
@@ -2305,12 +2313,12 @@ vm_object_prepare_buf_pages(vm_object_t object, vm_page_t *ma_dst, int count,
 	if (*rahead != 0) {
 		m = ma_src[count - 1];
 		pindex = m->pindex + 1;
-		msucc = TAILQ_NEXT(m, listq);
+		msucc = vm_radix_iter_lookup_ge(&pages, pindex);
 		*rahead = MIN(*rahead,
 		    (msucc != NULL ? msucc->pindex : object->size) - pindex);
 		mpred = m;
 		for (int i = 0; i < *rahead; i++) {
-			m = vm_page_alloc_after(object, pindex + i,
+			m = vm_page_alloc_after(object, &pages, pindex + i,
 			    VM_ALLOC_NORMAL, mpred);
 			if (m == NULL) {
 				*rahead = i;
@@ -2725,8 +2733,9 @@ DB_SHOW_COMMAND_FLAGS(vmochk, vm_object_check, DB_CMD_MEMSAFE)
 	TAILQ_FOREACH(object, &vm_object_list, object_list) {
 		if ((object->flags & OBJ_ANON) != 0) {
 			if (object->ref_count == 0) {
-				db_printf("vmochk: internal obj has zero ref count: %ld\n",
-					(long)object->size);
+				db_printf(
+			"vmochk: internal obj has zero ref count: %lu\n",
+				    (u_long)object->size);
 			}
 			if (!vm_object_in_map(object)) {
 				db_printf(
@@ -2761,11 +2770,12 @@ DB_SHOW_COMMAND(object, vm_object_print_static)
 	if (object == NULL)
 		return;
 
-	db_iprintf(
-	    "Object %p: type=%d, size=0x%jx, res=%d, ref=%d, flags=0x%x ruid %d charge %jx\n",
+	db_iprintf("Object %p: type=%d, size=0x%jx, res=%d, ref=%d, flags=0x%x",
 	    object, (int)object->type, (uintmax_t)object->size,
-	    object->resident_page_count, object->ref_count, object->flags,
-	    object->cred ? object->cred->cr_ruid : -1, (uintmax_t)object->charge);
+	    object->resident_page_count, object->ref_count, object->flags);
+	db_iprintf(" ruid %d charge %jx\n",
+	    object->cred ? object->cred->cr_ruid : -1,
+	    (uintmax_t)object->charge);
 	db_iprintf(" sref=%d, backing_object(%d)=(%p)+0x%jx\n",
 	    atomic_load_int(&object->shadow_count),
 	    object->backing_object ? object->backing_object->ref_count : 0,

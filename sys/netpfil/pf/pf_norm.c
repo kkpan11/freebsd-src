@@ -43,6 +43,7 @@
 
 #include <net/if.h>
 #include <net/if_var.h>
+#include <net/if_private.h>
 #include <net/vnet.h>
 #include <net/pfvar.h>
 #include <net/if_pflog.h>
@@ -1051,7 +1052,13 @@ pf_refragment6(struct ifnet *ifp, struct mbuf **m0, struct m_tag *mtag,
 			dst.sin6_len = sizeof(dst);
 			dst.sin6_addr = hdr->ip6_dst;
 
-			nd6_output_ifp(rt, rt, m, &dst, NULL);
+			if (m->m_pkthdr.len <= if_getmtu(ifp)) {
+				nd6_output_ifp(rt, rt, m, &dst, NULL);
+			} else {
+				in6_ifstat_inc(ifp, ifs6_in_toobig);
+				icmp6_error(m, ICMP6_PACKET_TOO_BIG, 0,
+				    if_getmtu(ifp));
+			}
 		} else if (forward) {
 			MPASS(m->m_pkthdr.rcvif != NULL);
 			ip6_forward(m, 0);
@@ -1486,7 +1493,7 @@ pf_normalize_tcp_init(struct pf_pdesc *pd, struct tcphdr *th,
 					src->scrub->pfss_flags |=
 					    PFSS_TIMESTAMP;
 					src->scrub->pfss_ts_mod =
-					    htonl(arc4random());
+					    arc4random();
 
 					/* note PFSS_PAWS not set yet */
 					memcpy(&tsval, &opt[2],
@@ -1626,13 +1633,11 @@ pf_normalize_tcp_stateful(struct pf_pdesc *pd,
 					    (src->scrub->pfss_flags &
 					    PFSS_TIMESTAMP)) {
 						tsval = ntohl(tsval);
-						pf_patch_32_unaligned(pd->m,
-						    &th->th_sum,
+						pf_patch_32(pd,
 						    &opt[2],
 						    htonl(tsval +
 						    src->scrub->pfss_ts_mod),
-						    PF_ALGNMNT(startoff),
-						    0);
+						    PF_ALGNMNT(startoff));
 						copyback = 1;
 					}
 
@@ -1644,12 +1649,10 @@ pf_normalize_tcp_stateful(struct pf_pdesc *pd,
 					    PFSS_TIMESTAMP)) {
 						tsecr = ntohl(tsecr)
 						    - dst->scrub->pfss_ts_mod;
-						pf_patch_32_unaligned(pd->m,
-						    &th->th_sum,
+						pf_patch_32(pd,
 						    &opt[6],
 						    htonl(tsecr),
-						    PF_ALGNMNT(startoff),
-						    0);
+						    PF_ALGNMNT(startoff));
 						copyback = 1;
 					}
 					got_ts = 1;
@@ -1971,11 +1974,9 @@ pf_normalize_mss(struct pf_pdesc *pd)
 		case TCPOPT_MAXSEG:
 			mss = (u_int16_t *)(optp + 2);
 			if ((ntohs(*mss)) > pd->act.max_mss) {
-				pf_patch_16_unaligned(pd->m,
-				    &th->th_sum,
+				pf_patch_16(pd,
 				    mss, htons(pd->act.max_mss),
-				    PF_ALGNMNT(startoff),
-				    0);
+				    PF_ALGNMNT(startoff));
 				m_copyback(pd->m, pd->off + sizeof(*th),
 				    thoff - sizeof(*th), opts);
 				m_copyback(pd->m, pd->off, sizeof(*th), (caddr_t)th);
