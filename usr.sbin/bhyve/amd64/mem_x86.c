@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2019 The FreeBSD Foundation
+ * Copyright (c) 2025 The FreeBSD Foundation
  *
  * This software was developed by Konstantin Belousov <kib@FreeBSD.org>
  * under sponsorship from the FreeBSD Foundation.
@@ -28,17 +28,55 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _ARCH_RISCV_PTHREAD_TLS_H
-#define	_ARCH_RISCV_PTHREAD_TLS_H
+#include <sys/types.h>
+#include <sys/errno.h>
+#include <sys/tree.h>
+#include <machine/vmm.h>
 
-static __inline uintptr_t
-_get_static_tls_base(struct pthread *thr, size_t offset)
+#include <stdio.h>
+
+#include "debug.h"
+#include "mem.h"
+
+static int
+no_mem_handler(struct vcpu *vcpu __unused, int dir, uint64_t addr __unused,
+    int size, uint64_t *val, void *arg1 __unused, long arg2 __unused)
 {
-	uintptr_t tlsbase;
-
-	tlsbase = (uintptr_t)thr->tcb;
-	tlsbase += offset;
-	return (tlsbase);
+	if (dir == MEM_F_READ) {
+		switch (size) {
+		case 1:
+			*val = 0xff;
+			break;
+		case 2:
+			*val = 0xffff;
+			break;
+		case 4:
+			*val = 0xffffffff;
+			break;
+		case 8:
+			*val = 0xffffffffffffffff;
+			break;
+		}
+	}
+	return (0);
 }
 
-#endif
+static struct mem_range fb_entry = {
+	.handler = no_mem_handler,
+	.base = 0,
+	.size = 0xffffffffffffffff,
+};
+
+/*
+ * x86 hardware ignores writes without receiver, and returns all 1's
+ * from reads without response to transaction.
+ */
+int
+mmio_handle_non_backed_mem(struct vcpu *vcpu __unused, uint64_t paddr,
+    struct mem_range **mr_paramp)
+{
+	*mr_paramp = &fb_entry;
+	EPRINTLN("Emulating access to non-existent address to %#lx\n",
+	    paddr);
+	return (0);
+}

@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2019 The FreeBSD Foundation
+ * Copyright (c) 2025 The FreeBSD Foundation
  *
  * This software was developed by Konstantin Belousov <kib@FreeBSD.org>
  * under sponsorship from the FreeBSD Foundation.
@@ -28,17 +28,31 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LIBC_AMD64_STATIC_TLS_H
-#define	_LIBC_AMD64_STATIC_TLS_H
+#include <sys/types.h>
+#define _WANT_KERNEL_ERRNO 1
+#include <sys/errno.h>
+#include <sys/tree.h>
+#include <machine/armreg.h>
+#include <machine/vmm.h>
+#include <machine/vmm_instruction_emul.h>
+#include <vmmapi.h>
 
-static __inline uintptr_t
-_libc_get_static_tls_base(size_t offset)
+#include "mem.h"
+
+int
+mmio_handle_non_backed_mem(struct vcpu *vcpu, uint64_t paddr,
+    struct mem_range **mr_paramp __unused)
 {
-	uintptr_t tlsbase;
+	int err;
+	uint64_t spsr, esr;
 
-	__asm __volatile("movq %%fs:0, %0" : "=r" (tlsbase));
-	tlsbase -= offset;
-	return (tlsbase);
+	if (vm_get_register(vcpu, VM_REG_GUEST_CPSR, &spsr) == -1)
+		return (errno);
+	if ((spsr & PSR_M_MASK) == PSR_M_EL0t)
+		esr = EXCP_DATA_ABORT_L << ESR_ELx_EC_SHIFT;
+	else
+		esr = EXCP_DATA_ABORT << ESR_ELx_EC_SHIFT;
+	esr |= ESR_ELx_IL | ISS_DATA_DFSC_EXT;
+	err = vm_inject_exception(vcpu, esr, paddr);
+	return (err != 0 ? err : EJUSTRETURN);
 }
-
-#endif

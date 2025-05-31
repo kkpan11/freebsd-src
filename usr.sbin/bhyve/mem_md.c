@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2019 The FreeBSD Foundation
+ * Copyright (c) 2025 The FreeBSD Foundation
  *
  * This software was developed by Konstantin Belousov <kib@FreeBSD.org>
  * under sponsorship from the FreeBSD Foundation.
@@ -28,17 +28,17 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _LIBC_POWERPC64_STATIC_TLS_H
-#define _LIBC_POWERPC64_STATIC_TLS_H
+#include <sys/types.h>
+#include <sys/errno.h>
+#include <sys/tree.h>
+#include <machine/vmm.h>
+#include <machine/vmm_instruction_emul.h>
 
-static __inline uintptr_t
-_libc_get_static_tls_base(size_t offset)
+#include "mem.h"
+
+int
+mmio_handle_non_backed_mem(struct vcpu *vcpu __unused, uint64_t paddr __unused,
+    struct mem_range **mr_paramp __unused)
 {
-	uintptr_t tlsbase;
-
-	__asm __volatile("mr %0,13" : "=r"(tlsbase));
-	tlsbase += offset - 0x7010;
-	return (tlsbase);
+	return (ESRCH);
 }
-
-#endif
