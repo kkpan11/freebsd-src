@@ -489,33 +489,31 @@ _pctrie_lookup_node(struct pctrie *ptree, struct pctrie_node *node,
 	struct pctrie_node *parent;
 	int slot;
 
+	parent = node;
+	if (parent == NULL)
+		node = pctrie_root_load(ptree, smr, access);
+
 	/*
 	 * Climb the search path to find the lowest node from which to start the
 	 * search for a value matching 'index'.
 	 */
-	while (node != NULL) {
-		KASSERT(access == PCTRIE_SMR || !powerof2(node->pn_popmap),
+	while (parent != NULL) {
+		KASSERT(access == PCTRIE_SMR || !powerof2(parent->pn_popmap),
 		    ("%s: freed node in iter path", __func__));
+		node = parent;
 		if (!pctrie_keybarr(node, index, &slot))
 			break;
-		node = pctrie_parent(node);
-	}
-
-	if (node == NULL) {
-		parent = NULL;
-		node = pctrie_root_load(ptree, smr, access);
-	} else {
-		parent = node;
-		node = pctrie_node_load(&node->pn_child[slot], smr, access);
+		parent = pctrie_parent(node);
 	}
 
 	/* Seek a node that matches index. */
 	while (!pctrie_isleaf(node) && !pctrie_keybarr(node, index, &slot)) {
 		parent = node;
+		KASSERT(access == PCTRIE_SMR || !powerof2(parent->pn_popmap),
+		    ("%s: freed node in iter path", __func__));
 		node = pctrie_node_load(&node->pn_child[slot], smr, access);
 	}
-	if (parent_out != NULL)
-		*parent_out = parent;
+	*parent_out = parent;
 	return (node);
 }
 
@@ -528,9 +526,9 @@ pctrie_iter_lookup(struct pctrie_iter *it, uint64_t index)
 {
 	struct pctrie_node *node;
 
-	it->index = index;
 	node = _pctrie_lookup_node(it->ptree, it->node, index, &it->node,
 	    NULL, PCTRIE_LOCKED);
+	it->index = index;
 	return (pctrie_match_value(node, index));
 }
 
@@ -544,9 +542,9 @@ pctrie_iter_insert_lookup(struct pctrie_iter *it, uint64_t *val)
 {
 	struct pctrie_node *node;
 
-	it->index = *val;
 	node = _pctrie_lookup_node(it->ptree, it->node, *val, &it->node,
 	    NULL, PCTRIE_LOCKED);
+	it->index = *val;
 	if (node == PCTRIE_NULL) {
 		if (it->node == NULL)
 			pctrie_node_store(pctrie_root(it->ptree),
@@ -630,16 +628,44 @@ _pctrie_lookup_range(struct pctrie *ptree, struct pctrie_node *node,
 		base = (index + i) % PCTRIE_COUNT;
 		if (base == 0 || parent == NULL || parent->pn_clev != 0)
 			continue;
-		end = MIN(count, i + PCTRIE_COUNT - base);
+
+		/*
+		 * For PCTRIE_SMR, compute an upper bound on the number of
+		 * children of this parent left to examine.  For PCTRIE_LOCKED,
+		 * compute the number of non-NULL children from base up to the
+		 * first NULL child, if any, using the fact that pn_popmap has
+		 * bits set for only the non-NULL children.
+		 *
+		 * The pn_popmap field is accessed only when a lock is held.
+		 * To use it for PCTRIE_SMR here would require that we know that
+		 * race conditions cannot occur if the tree is modified while
+		 * accessed here.  Guarantees about the visibility of changes to
+		 * child pointers, enforced by memory barriers on the writing of
+		 * pointers, are not present for the pn_popmap field, so that
+		 * the popmap bit for a child page may, for an instant,
+		 * misrepresent the nullness of the child page because an
+		 * operation modifying the pctrie is in progress.
+		 */
+		end = (access == PCTRIE_SMR) ? PCTRIE_COUNT - base :
+		    ffs((parent->pn_popmap >> base) + 1) - 1;
+		end = MIN(count, i + end);
 		while (i < end) {
 			node = pctrie_node_load(&parent->pn_child[base++],
 			    smr, access);
-			if ((val = pctrie_toval(node)) == NULL)
+			val = pctrie_toval(node);
+			if (access == PCTRIE_SMR && val == NULL)
 				break;
 			value[i++] = val;
+			KASSERT(val != NULL,
+			    ("%s: null child written to range", __func__));
 		}
-		if (i < end)
-			break;
+		if (access == PCTRIE_SMR) {
+			if (i < end)
+				break;
+		} else {
+			if (base < PCTRIE_COUNT)
+				break;
+		}
 	}
 	if (parent_out != NULL)
 		*parent_out = parent;

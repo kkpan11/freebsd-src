@@ -393,7 +393,6 @@ MAN=	accept_filter.9 \
 	vm_map_max.9 \
 	vm_map_protect.9 \
 	vm_map_remove.9 \
-	vm_map_simplify_entry.9 \
 	vm_map_stack.9 \
 	vm_map_submap.9 \
 	vm_map_sync.9 \
@@ -1639,7 +1638,8 @@ MLINKS+=mutex.9 mtx_assert.9 \
 	mutex.9 mtx_unlock_flags.9 \
 	mutex.9 mtx_unlock_spin.9 \
 	mutex.9 mtx_unlock_spin_flags.9
-MLINKS+=namei.9 NDFREE.9 \
+MLINKS+=namei.9 NDFREE_PNBUF.9 \
+	namei.9 NDINIT_AT.9 \
 	namei.9 NDINIT.9
 MLINKS+=netisr.9 netisr_clearqdrops.9 \
 	netisr.9 netisr_default_flow2cpu.9 \
