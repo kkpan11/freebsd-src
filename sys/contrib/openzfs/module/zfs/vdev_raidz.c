@@ -2257,10 +2257,18 @@ vdev_raidz_asize_to_psize(vdev_t *vd, uint64_t asize, uint64_t txg)
 	ASSERT0(asize % (1 << ashift));
 
 	psize = (asize >> ashift);
+	/*
+	 * If the roundup to nparity + 1 caused us to spill into a new row, we
+	 * need to ignore that row entirely (since it can't store data or
+	 * parity).
+	 */
+	uint64_t rows = psize / cols;
+	psize = psize - (rows * cols) <= nparity ? rows * cols : psize;
+	/*  Subtract out parity sectors for each row storing data. */
 	psize -= nparity * DIV_ROUND_UP(psize, cols);
 	psize <<= ashift;
 
-	return (asize);
+	return (psize);
 }
 
 /*
@@ -4652,7 +4660,8 @@ spa_raidz_expand_thread(void *arg, zthr_t *zthr)
 			dmu_tx_t *tx =
 			    dmu_tx_create_dd(spa_get_dsl(spa)->dp_mos_dir);
 
-			VERIFY0(dmu_tx_assign(tx, DMU_TX_WAIT));
+			VERIFY0(dmu_tx_assign(tx,
+			    DMU_TX_WAIT | DMU_TX_SUSPEND));
 			uint64_t txg = dmu_tx_get_txg(tx);
 
 			/*

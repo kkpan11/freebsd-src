@@ -244,6 +244,7 @@ MAN=	aac.4 \
 	${_io.4} \
 	${_ioat.4} \
 	ip.4 \
+	ip17x.4 \
 	ip6.4 \
 	ipfirewall.4 \
 	ipheth.4 \
@@ -289,6 +290,8 @@ MAN=	aac.4 \
 	linprocfs.4 \
 	linsysfs.4 \
 	${_linux.4} \
+	linuxkpi.4 \
+	linuxkpi_wlan.4 \
 	liquidio.4 \
 	lm75.4 \
 	lo.4 \
@@ -340,6 +343,7 @@ MAN=	aac.4 \
 	msdosfs.4 \
 	msk.4 \
 	mtio.4 \
+	mtkswitch.4 \
 	multicast.4 \
 	muge.4 \
 	mvs.4 \
@@ -623,6 +627,7 @@ MAN=	aac.4 \
 	wlan_acl.4 \
 	wlan_amrr.4 \
 	wlan_ccmp.4 \
+	wlan_gcmp.4 \
 	wlan_tkip.4 \
 	wlan_wep.4 \
 	wlan_xauth.4 \

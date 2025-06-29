@@ -251,10 +251,10 @@ static struct {
 	{ NFSV4OP_CREATE, 5, "Create", 6, },
 	{ NFSV4OP_CREATE, 1, "Create", 6, },
 	{ NFSV4OP_CREATE, 3, "Create", 6, },
+	{ NFSV4OP_REMOVE, 3, "Remove", 6, },
 	{ NFSV4OP_REMOVE, 1, "Remove", 6, },
-	{ NFSV4OP_REMOVE, 1, "Remove", 6, },
-	{ NFSV4OP_SAVEFH, 5, "Rename", 6, },
-	{ NFSV4OP_SAVEFH, 4, "Link", 4, },
+	{ NFSV4OP_SAVEFH, 7, "Rename", 6, },
+	{ NFSV4OP_SAVEFH, 6, "Link", 4, },
 	{ NFSV4OP_READDIR, 2, "Readdir", 7, },
 	{ NFSV4OP_READDIR, 2, "Readdir", 7, },
 	{ NFSV4OP_GETATTR, 1, "Getattr", 7, },
@@ -4723,7 +4723,7 @@ newnfs_sndlock(int *flagp)
 		ts.tv_sec = 0;
 		ts.tv_nsec = 0;
 		(void) nfsmsleep((caddr_t)flagp, NFSSOCKMUTEXPTR,
-		    PZERO - 1, "nfsndlck", &ts);
+		    PVFS, "nfsndlck", &ts);
 	}
 	*flagp |= NFSR_SNDLOCK;
 	NFSUNLOCKSOCK();
