@@ -66,24 +66,24 @@
 void	 usage(void);
 int	 pfctl_enable(int, int);
 int	 pfctl_disable(int, int);
-int	 pfctl_clear_stats(struct pfctl_handle *, int);
-int	 pfctl_get_skip_ifaces(void);
-int	 pfctl_check_skip_ifaces(char *);
-int	 pfctl_adjust_skip_ifaces(struct pfctl *);
-int	 pfctl_clear_interface_flags(int, int);
-int	 pfctl_flush_eth_rules(int, int, char *);
-int	 pfctl_flush_rules(int, int, char *);
-int	 pfctl_flush_nat(int, int, char *);
+void	 pfctl_clear_stats(struct pfctl_handle *, int);
+void	 pfctl_get_skip_ifaces(void);
+void	 pfctl_check_skip_ifaces(char *);
+void	 pfctl_adjust_skip_ifaces(struct pfctl *);
+void	 pfctl_clear_interface_flags(int, int);
+void	 pfctl_flush_eth_rules(int, int, char *);
+void	 pfctl_flush_rules(int, int, char *);
+void	 pfctl_flush_nat(int, int, char *);
 int	 pfctl_clear_altq(int, int);
-int	 pfctl_clear_src_nodes(int, int);
-int	 pfctl_clear_iface_states(int, const char *, int);
+void	 pfctl_clear_src_nodes(int, int);
+void	 pfctl_clear_iface_states(int, const char *, int);
 void	 pfctl_addrprefix(char *, struct pf_addr *);
-int	 pfctl_kill_src_nodes(int, const char *, int);
-int	 pfctl_net_kill_states(int, const char *, int);
-int	 pfctl_gateway_kill_states(int, const char *, int);
-int	 pfctl_label_kill_states(int, const char *, int);
-int	 pfctl_id_kill_states(int, const char *, int);
-int	 pfctl_key_kill_states(int, const char *, int);
+void	 pfctl_kill_src_nodes(int, const char *, int);
+void	 pfctl_net_kill_states(int, const char *, int);
+void	 pfctl_gateway_kill_states(int, const char *, int);
+void	 pfctl_label_kill_states(int, const char *, int);
+void	 pfctl_id_kill_states(int, const char *, int);
+void	 pfctl_key_kill_states(int, const char *, int);
 int	 pfctl_parse_host(char *, struct pf_rule_addr *);
 void	 pfctl_init_options(struct pfctl *);
 int	 pfctl_load_options(struct pfctl *);
@@ -258,7 +258,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-"usage: %s [-AdeghMmNnOPqRrvz] [-a anchor] [-D macro=value] [-F modifier]\n"
+"usage: %s [-AdeghMmNnOPqRSrvz] [-a anchor] [-D macro=value] [-F modifier]\n"
 	"\t[-f file] [-i interface] [-K host | network]\n"
 	"\t[-k host | network | gateway | label | id] [-o level] [-p device]\n"
 	"\t[-s modifier] [-t table -T command [address ...]] [-x level]\n",
@@ -354,7 +354,7 @@ pfctl_disable(int dev, int opts)
 	return (0);
 }
 
-int
+void
 pfctl_clear_stats(struct pfctl_handle *h, int opts)
 {
 	int ret;
@@ -362,10 +362,9 @@ pfctl_clear_stats(struct pfctl_handle *h, int opts)
 		errc(1, ret, "DIOCCLRSTATUS");
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "pf: statistics cleared\n");
-	return (0);
 }
 
-int
+void
 pfctl_get_skip_ifaces(void)
 {
 	bzero(&skip_b, sizeof(skip_b));
@@ -378,10 +377,9 @@ pfctl_get_skip_ifaces(void)
 		if (skip_b.pfrb_size <= skip_b.pfrb_msize)
 			break;
 	}
-	return (0);
 }
 
-int
+void
 pfctl_check_skip_ifaces(char *ifname)
 {
 	struct pfi_kif		*p;
@@ -403,10 +401,9 @@ pfctl_check_skip_ifaces(char *ifname)
 			}
 		}
 	}
-	return (0);
 }
 
-int
+void
 pfctl_adjust_skip_ifaces(struct pfctl *pf)
 {
 	struct pfi_kif		*p, *pp;
@@ -439,11 +436,9 @@ pfctl_adjust_skip_ifaces(struct pfctl *pf)
 
 		pfctl_set_interface_flags(pf, p->pfik_name, PFI_IFLAG_SKIP, 0);
 	}
-
-	return (0);
 }
 
-int
+void
 pfctl_clear_interface_flags(int dev, int opts)
 {
 	struct pfioc_iface	pi;
@@ -457,10 +452,9 @@ pfctl_clear_interface_flags(int dev, int opts)
 		if ((opts & PF_OPT_QUIET) == 0)
 			fprintf(stderr, "pf: interface flags reset\n");
 	}
-	return (0);
 }
 
-int
+void
 pfctl_flush_eth_rules(int dev, int opts, char *anchorname)
 {
 	int ret;
@@ -471,11 +465,9 @@ pfctl_flush_eth_rules(int dev, int opts, char *anchorname)
 
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "Ethernet rules cleared\n");
-
-	return (ret);
 }
 
-int
+void
 pfctl_flush_rules(int dev, int opts, char *anchorname)
 {
 	int ret;
@@ -485,10 +477,9 @@ pfctl_flush_rules(int dev, int opts, char *anchorname)
 		err(1, "pfctl_clear_rules");
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "rules cleared\n");
-	return (0);
 }
 
-int
+void
 pfctl_flush_nat(int dev, int opts, char *anchorname)
 {
 	int ret;
@@ -498,7 +489,6 @@ pfctl_flush_nat(int dev, int opts, char *anchorname)
 		err(1, "pfctl_clear_nat");
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "nat cleared\n");
-	return (0);
 }
 
 int
@@ -519,17 +509,16 @@ pfctl_clear_altq(int dev, int opts)
 	return (0);
 }
 
-int
+void
 pfctl_clear_src_nodes(int dev, int opts)
 {
 	if (ioctl(dev, DIOCCLRSRCNODES))
 		err(1, "DIOCCLRSRCNODES");
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "source tracking entries cleared\n");
-	return (0);
 }
 
-int
+void
 pfctl_clear_iface_states(int dev, const char *iface, int opts)
 {
 	struct pfctl_kill kill;
@@ -548,7 +537,6 @@ pfctl_clear_iface_states(int dev, const char *iface, int opts)
 		errc(1, ret, "DIOCCLRSTATES");
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "%d states cleared\n", killed);
-	return (0);
 }
 
 void
@@ -601,7 +589,7 @@ pfctl_addrprefix(char *addr, struct pf_addr *mask)
 	freeaddrinfo(res);
 }
 
-int
+void
 pfctl_kill_src_nodes(int dev, const char *iface, int opts)
 {
 	struct pfioc_src_node_kill psnk;
@@ -701,10 +689,9 @@ pfctl_kill_src_nodes(int dev, const char *iface, int opts)
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "killed %d src nodes from %d sources and %d "
 		    "destinations\n", killed, sources, dests);
-	return (0);
 }
 
-int
+void
 pfctl_net_kill_states(int dev, const char *iface, int opts)
 {
 	struct pfctl_kill kill;
@@ -817,10 +804,9 @@ pfctl_net_kill_states(int dev, const char *iface, int opts)
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "killed %d states from %d sources and %d "
 		    "destinations\n", killed, sources, dests);
-	return (0);
 }
 
-int
+void
 pfctl_gateway_kill_states(int dev, const char *iface, int opts)
 {
 	struct pfctl_kill kill;
@@ -881,10 +867,9 @@ pfctl_gateway_kill_states(int dev, const char *iface, int opts)
 
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "killed %d states\n", killed);
-	return (0);
 }
 
-int
+void
 pfctl_label_kill_states(int dev, const char *iface, int opts)
 {
 	struct pfctl_kill kill;
@@ -912,11 +897,9 @@ pfctl_label_kill_states(int dev, const char *iface, int opts)
 
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "killed %d states\n", killed);
-
-	return (0);
 }
 
-int
+void
 pfctl_id_kill_states(int dev, const char *iface, int opts)
 {
 	struct pfctl_kill kill;
@@ -952,11 +935,9 @@ pfctl_id_kill_states(int dev, const char *iface, int opts)
 
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "killed %d states\n", killed);
-
-	return (0);
 }
 
-int
+void
 pfctl_key_kill_states(int dev, const char *iface, int opts)
 {
 	struct pfctl_kill kill;
@@ -1014,8 +995,6 @@ pfctl_key_kill_states(int dev, const char *iface, int opts)
 
 	if ((opts & PF_OPT_QUIET) == 0)
 		fprintf(stderr, "killed %d states\n", killed);
-
-	return (0);
 }
 
 int
@@ -2273,8 +2252,8 @@ int
 pfctl_rules(int dev, char *filename, int opts, int optimize,
     char *anchorname, struct pfr_buffer *trans)
 {
-#define ERR(x) do { warn(x); goto _error; } while(0)
-#define ERRX(x) do { warnx(x); goto _error; } while(0)
+#define ERR(...) do { warn(__VA_ARGS__); goto _error; } while(0)
+#define ERRX(...) do { warnx(__VA_ARGS__); goto _error; } while(0)
 
 	struct pfr_buffer	*t, buf;
 	struct pfioc_altq	 pa;
@@ -2282,7 +2261,7 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 	struct pfctl_ruleset	*rs;
 	struct pfctl_eth_ruleset	*ethrs;
 	struct pfr_table	 trs;
-	char			*path;
+	char			*path = NULL;
 	int			 osize;
 
 	RB_INIT(&pf_anchors);
@@ -2309,10 +2288,10 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 	memset(&pf, 0, sizeof(pf));
 	memset(&trs, 0, sizeof(trs));
 	if ((path = calloc(1, MAXPATHLEN)) == NULL)
-		ERRX("pfctl_rules: calloc");
+		ERRX("%s: calloc", __func__);
 	if (strlcpy(trs.pfrt_anchor, anchorname,
 	    sizeof(trs.pfrt_anchor)) >= sizeof(trs.pfrt_anchor))
-		ERRX("pfctl_rules: strlcpy");
+		ERRX("%s: strlcpy", __func__);
 	pf.dev = dev;
 	pf.h = pfh;
 	pf.opts = opts;
@@ -2321,16 +2300,16 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 
 	/* non-brace anchor, create without resolving the path */
 	if ((pf.anchor = calloc(1, sizeof(*pf.anchor))) == NULL)
-		ERRX("pfctl_rules: calloc");
+		ERRX("%s: calloc", __func__);
 	rs = &pf.anchor->ruleset;
 	pf_init_ruleset(rs);
 	rs->anchor = pf.anchor;
 	if (strlcpy(pf.anchor->path, anchorname,
 	    sizeof(pf.anchor->path)) >= sizeof(pf.anchor->path))
-		errx(1, "pfctl_rules: strlcpy");
+		errx(1, "%s: strlcpy", __func__);
 	if (strlcpy(pf.anchor->name, anchorname,
 	    sizeof(pf.anchor->name)) >= sizeof(pf.anchor->name))
-		errx(1, "pfctl_rules: strlcpy");
+		errx(1, "%s: strlcpy", __func__);
 
 
 	pf.astack[0] = pf.anchor;
@@ -2343,14 +2322,14 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 
 	/* Set up ethernet anchor */
 	if ((pf.eanchor = calloc(1, sizeof(*pf.eanchor))) == NULL)
-		ERRX("pfctl_rules: calloc");
+		ERRX("%s: calloc", __func__);
 
 	if (strlcpy(pf.eanchor->path, anchorname,
 	    sizeof(pf.eanchor->path)) >= sizeof(pf.eanchor->path))
-		errx(1, "pfctl_rules: strlcpy");
+		errx(1, "%s: strlcpy", __func__);
 	if (strlcpy(pf.eanchor->name, anchorname,
 	    sizeof(pf.eanchor->name)) >= sizeof(pf.eanchor->name))
-		errx(1, "pfctl_rules: strlcpy");
+		errx(1, "%s: strlcpy", __func__);
 
 	ethrs = &pf.eanchor->ruleset;
 	pf_init_eth_ruleset(ethrs);
@@ -2364,7 +2343,7 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 		 * loaded at parse time.
 		 */
 		if (pfctl_ruleset_trans(&pf, anchorname, pf.anchor, true))
-			ERRX("pfctl_rules");
+			ERRX("%s", __func__);
 		if (pf.loadopt & PFCTL_FLAG_ETH)
 			pf.eth_ticket = pfctl_get_ticket(t, PF_RULESET_ETH, anchorname);
 		if (altqsupport && (pf.loadopt & PFCTL_FLAG_ALTQ))
@@ -2405,17 +2384,17 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 		if (check_commit_altq(dev, opts) != 0)
 			ERRX("errors in altq config");
 
-	/* process "load anchor" directives */
-	if (!anchorname[0])
+	if (trans == NULL) {
+		/* process "load anchor" directives */
 		if (pfctl_load_anchors(dev, &pf, t) == -1)
 			ERRX("load anchors");
 
-	if (trans == NULL && (opts & PF_OPT_NOACTION) == 0) {
-		if (!anchorname[0])
-			if (pfctl_load_options(&pf))
+		if ((opts & PF_OPT_NOACTION) == 0) {
+			if (!anchorname[0] && pfctl_load_options(&pf))
 				goto _error;
-		if (pfctl_trans(dev, t, DIOCXCOMMIT, osize))
-			ERR("DIOCXCOMMIT");
+			if (pfctl_trans(dev, t, DIOCXCOMMIT, osize))
+				ERR("DIOCXCOMMIT");
+		}
 	}
 	free(path);
 	return (0);
@@ -2516,7 +2495,7 @@ pfctl_load_options(struct pfctl *pf)
 	}
 
 	/*
-	 * If we've set the limit, but haven't explicitly set adaptive
+	 * If we've set the states limit, but haven't explicitly set adaptive
 	 * timeouts, do it now with a start of 60% and end of 120%.
 	 */
 	if (pf->limit_set[PF_LIMIT_STATES] &&
@@ -3056,7 +3035,7 @@ main(int argc, char *argv[])
 		usage();
 
 	while ((ch = getopt(argc, argv,
-	    "a:AdD:eqf:F:ghi:k:K:mMnNOo:Pp:rRs:t:T:vx:z")) != -1) {
+	    "a:AdD:eqf:F:ghi:k:K:mMnNOo:Pp:rRs:St:T:vx:z")) != -1) {
 		switch (ch) {
 		case 'a':
 			anchoropt = optarg;
@@ -3158,6 +3137,9 @@ main(int argc, char *argv[])
 				usage();
 			}
 			break;
+		case 'S':
+			opts |= PF_OPT_NODNS;
+			break;
 		case 't':
 			tableopt = optarg;
 			break;
@@ -3193,6 +3175,9 @@ main(int argc, char *argv[])
 		}
 	}
 
+	if (tblcmdopt == NULL ^ tableopt == NULL)
+		usage();
+
 	if (tblcmdopt != NULL) {
 		argc -= optind;
 		argv += optind;
@@ -3201,7 +3186,7 @@ main(int argc, char *argv[])
 			loadopt |= PFCTL_FLAG_TABLE;
 			tblcmdopt = NULL;
 		} else
-			mode = strchr("acdefkrz", ch) ? O_RDWR : O_RDONLY;
+			mode = strchr("st", ch) ? O_RDONLY : O_RDWR;
 	} else if (argc != optind) {
 		warnx("unknown command line argument: %s ...", argv[optind]);
 		usage();
@@ -3210,11 +3195,18 @@ main(int argc, char *argv[])
 	if (loadopt == 0)
 		loadopt = ~0;
 
-	if ((path = calloc(1, MAXPATHLEN)) == NULL)
-		errx(1, "pfctl: calloc");
 	memset(anchorname, 0, sizeof(anchorname));
 	if (anchoropt != NULL) {
 		int len = strlen(anchoropt);
+
+		if (mode == O_RDONLY && showopt == NULL && tblcmdopt == NULL) {
+			warnx("anchors apply to -f, -F, -s, and -T only");
+			usage();
+		}
+		if (mode == O_RDWR && tblcmdopt == NULL &&
+		    (anchoropt[0] == '_' || strstr(anchoropt, "/_") != NULL))
+			errx(1, "anchor names beginning with '_' cannot "
+			    "be modified from the command line");
 
 		if (len >= 1 && anchoropt[len - 1] == '*') {
 			if (len >= 2 && anchoropt[len - 2] == '/')
@@ -3255,6 +3247,9 @@ main(int argc, char *argv[])
 	if (opts & PF_OPT_DISABLE)
 		if (pfctl_disable(dev, opts))
 			error = 1;
+
+	if ((path = calloc(1, MAXPATHLEN)) == NULL)
+		errx(1, "%s: calloc", __func__);
 
 	if (showopt != NULL) {
 		switch (*showopt) {
@@ -3347,10 +3342,6 @@ main(int argc, char *argv[])
 	}
 
 	if (clearopt != NULL) {
-		if (anchorname[0] == '_' || strstr(anchorname, "/_") != NULL)
-			errx(1, "anchor names beginning with '_' cannot "
-			    "be modified from the command line");
-
 		switch (*clearopt) {
 		case 'e':
 			pfctl_flush_eth_rules(dev, opts, anchorname);
@@ -3412,7 +3403,7 @@ main(int argc, char *argv[])
 		pfctl_kill_src_nodes(dev, ifaceopt, opts);
 
 	if (tblcmdopt != NULL) {
-		error = pfctl_command_tables(argc, argv, tableopt,
+		error = pfctl_table(argc, argv, tableopt,
 		    tblcmdopt, rulesopt, anchorname, opts);
 		rulesopt = NULL;
 	}
@@ -3433,8 +3424,7 @@ main(int argc, char *argv[])
 
 	if ((rulesopt != NULL) && (loadopt & PFCTL_FLAG_OPTION) &&
 	    !anchorname[0] && !(opts & PF_OPT_NOACTION))
-		if (pfctl_get_skip_ifaces())
-			error = 1;
+		pfctl_get_skip_ifaces();
 
 	if (rulesopt != NULL && !(opts & PF_OPT_MERGE) &&
 	    !anchorname[0] && (loadopt & PFCTL_FLAG_OPTION))
@@ -3442,9 +3432,6 @@ main(int argc, char *argv[])
 			error = 1;
 
 	if (rulesopt != NULL) {
-		if (anchorname[0] == '_' || strstr(anchorname, "/_") != NULL)
-			errx(1, "anchor names beginning with '_' cannot "
-			    "be modified from the command line");
 		if (pfctl_rules(dev, rulesopt, opts, optimize,
 		    anchorname, NULL))
 			error = 1;

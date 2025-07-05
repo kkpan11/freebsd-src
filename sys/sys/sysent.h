@@ -145,6 +145,8 @@ struct sysentvec {
 	int		(*sv_trap)(struct thread *);
 	u_long		*sv_hwcap;	/* Value passed in AT_HWCAP. */
 	u_long		*sv_hwcap2;	/* Value passed in AT_HWCAP2. */
+	u_long		*sv_hwcap3;	/* Value passed in AT_HWCAP3. */
+	u_long		*sv_hwcap4;	/* Value passed in AT_HWCAP4. */
 	const char	*(*sv_machine_arch)(struct proc *);
 	vm_offset_t	sv_fxrng_gen_offset;
 	void		(*sv_onexec_old)(struct thread *td);
@@ -162,7 +164,7 @@ struct sysentvec {
 
 #define	SV_ILP32	0x000100	/* 32-bit executable. */
 #define	SV_LP64		0x000200	/* 64-bit executable. */
-#define	SV_IA32		0x004000	/* Intel 32-bit executable. */
+#define	SV_RESERVED0	0x004000	/* Formerly SV_IA32 */
 #define	SV_AOUT		0x008000	/* a.out executable. */
 #define	SV_SHP		0x010000	/* Shared page. */
 #define	SV_SIGSYS	0x020000	/* SIGSYS for non-existing syscall */

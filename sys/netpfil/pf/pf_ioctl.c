@@ -615,7 +615,7 @@ pf_free_rule(struct pf_krule *rule)
 		pfi_kkif_unref(rule->kif);
 	if (rule->rcv_kif)
 		pfi_kkif_unref(rule->rcv_kif);
-	pf_kanchor_remove(rule);
+	pf_remove_kanchor(rule);
 	pf_empty_kpool(&rule->rdr.list);
 	pf_empty_kpool(&rule->nat.list);
 	pf_empty_kpool(&rule->route.list);
@@ -1537,7 +1537,7 @@ pf_addr_copyout(struct pf_addr_wrap *addr)
 static void
 pf_src_node_copy(const struct pf_ksrc_node *in, struct pf_src_node *out)
 {
-	int	secs = time_uptime, diff;
+	int	secs = time_uptime;
 
 	bzero(out, sizeof(struct pf_src_node));
 
@@ -1564,14 +1564,11 @@ pf_src_node_copy(const struct pf_ksrc_node *in, struct pf_src_node *out)
 		out->expire = 0;
 
 	/* Adjust the connection rate estimate. */
-	out->conn_rate = in->conn_rate;
-	diff = secs - in->conn_rate.last;
-	if (diff >= in->conn_rate.seconds)
-		out->conn_rate.count = 0;
-	else
-		out->conn_rate.count -=
-		    in->conn_rate.count * diff /
-		    in->conn_rate.seconds;
+	out->conn_rate.limit = in->conn_rate.limit;
+	out->conn_rate.seconds = in->conn_rate.seconds;
+	/* If there's no limit there's no counter_rate. */
+	if (in->conn_rate.cr != NULL)
+		out->conn_rate.count = counter_rate_get(in->conn_rate.cr);
 }
 
 #ifdef ALTQ
@@ -2159,7 +2156,6 @@ pf_ioctl_addrule(struct pf_krule *rule, uint32_t ticket,
 
 	if (rule->rtableid > 0 && rule->rtableid >= rt_numfibs)
 		error = EBUSY;
-
 #ifdef ALTQ
 	/* set queue IDs */
 	if (rule->qname[0] != 0) {
@@ -2184,6 +2180,9 @@ pf_ioctl_addrule(struct pf_krule *rule, uint32_t ticket,
 		error = EINVAL;
 	if (!rule->log)
 		rule->logif = 0;
+	if (! pf_init_threshold(&rule->pktrate, rule->pktrate.limit,
+	   rule->pktrate.seconds))
+		error = ENOMEM;
 	if (pf_addr_setup(ruleset, &rule->src.addr, rule->af))
 		error = ENOMEM;
 	if (pf_addr_setup(ruleset, &rule->dst.addr, rule->af))
@@ -2351,15 +2350,17 @@ relock_DIOCKILLSTATES:
 		if (psk->psk_proto && psk->psk_proto != sk->proto)
 			continue;
 
-		if (! PF_MATCHA(psk->psk_src.neg, &psk->psk_src.addr.v.a.addr,
+		if (! pf_match_addr(psk->psk_src.neg,
+		    &psk->psk_src.addr.v.a.addr,
 		    &psk->psk_src.addr.v.a.mask, srcaddr, sk->af))
 			continue;
 
-		if (! PF_MATCHA(psk->psk_dst.neg, &psk->psk_dst.addr.v.a.addr,
+		if (! pf_match_addr(psk->psk_dst.neg,
+		    &psk->psk_dst.addr.v.a.addr,
 		    &psk->psk_dst.addr.v.a.mask, dstaddr, sk->af))
 			continue;
 
-		if (!  PF_MATCHA(psk->psk_rt_addr.neg,
+		if (!  pf_match_addr(psk->psk_rt_addr.neg,
 		    &psk->psk_rt_addr.addr.v.a.addr,
 		    &psk->psk_rt_addr.addr.v.a.mask,
 		    &s->act.rt_addr, sk->af))
@@ -2399,10 +2400,10 @@ relock_DIOCKILLSTATES:
 
 			match_key.af = s->key[idx]->af;
 			match_key.proto = s->key[idx]->proto;
-			PF_ACPY(&match_key.addr[0],
+			pf_addrcpy(&match_key.addr[0],
 			    &s->key[idx]->addr[1], match_key.af);
 			match_key.port[0] = s->key[idx]->port[1];
-			PF_ACPY(&match_key.addr[1],
+			pf_addrcpy(&match_key.addr[1],
 			    &s->key[idx]->addr[0], match_key.af);
 			match_key.port[1] = s->key[idx]->port[0];
 		}
@@ -2439,7 +2440,7 @@ pf_start(void)
 		if (! TAILQ_EMPTY(V_pf_keth->active.rules))
 			hook_pf_eth();
 		V_pf_status.running = 1;
-		V_pf_status.since = time_second;
+		V_pf_status.since = time_uptime;
 		new_unrhdr64(&V_pf_stateid, time_second);
 
 		DPFPRINTF(PF_DEBUG_MISC, ("pf: started\n"));
@@ -2461,7 +2462,7 @@ pf_stop(void)
 		V_pf_status.running = 0;
 		dehook_pf();
 		dehook_pf_eth();
-		V_pf_status.since = time_second;
+		V_pf_status.since = time_uptime;
 		DPFPRINTF(PF_DEBUG_MISC, ("pf: stopped\n"));
 	}
 	sx_xunlock(&V_pf_ioctl_lock);
@@ -2481,7 +2482,7 @@ pf_ioctl_clear_status(void)
 		counter_u64_zero(V_pf_status.scounters[i]);
 	for (int i = 0; i < KLCNT_MAX; i++)
 		counter_u64_zero(V_pf_status.lcounters[i]);
-	V_pf_status.since = time_second;
+	V_pf_status.since = time_uptime;
 	if (*V_pf_status.ifname)
 		pfi_update_status(V_pf_status.ifname, NULL);
 	PF_RULES_WUNLOCK();
@@ -2739,7 +2740,7 @@ pf_ioctl_get_rulesets(struct pfioc_ruleset *pr)
 		return (ENOENT);
 	}
 	pr->nr = 0;
-	if (ruleset->anchor == NULL) {
+	if (ruleset == &pf_main_ruleset) {
 		/* XXX kludge for pf_main_ruleset */
 		RB_FOREACH(anchor, pf_kanchor_global, &V_pf_anchors)
 			if (anchor->parent == NULL)
@@ -2771,7 +2772,7 @@ pf_ioctl_get_ruleset(struct pfioc_ruleset *pr)
 	}
 
 	pr->name[0] = 0;
-	if (ruleset->anchor == NULL) {
+	if (ruleset == &pf_main_ruleset) {
 		/* XXX kludge for pf_main_ruleset */
 		RB_FOREACH(anchor, pf_kanchor_global, &V_pf_anchors)
 			if (anchor->parent == NULL && nr++ == pr->nr) {
@@ -4153,9 +4154,9 @@ DIOCGETSTATESV2_full:
 			bzero(&key, sizeof(key));
 			key.af = pnl->af;
 			key.proto = pnl->proto;
-			PF_ACPY(&key.addr[sidx], &pnl->saddr, pnl->af);
+			pf_addrcpy(&key.addr[sidx], &pnl->saddr, pnl->af);
 			key.port[sidx] = pnl->sport;
-			PF_ACPY(&key.addr[didx], &pnl->daddr, pnl->af);
+			pf_addrcpy(&key.addr[didx], &pnl->daddr, pnl->af);
 			key.port[didx] = pnl->dport;
 
 			state = pf_find_state_all(&key, direction, &m);
@@ -4167,9 +4168,11 @@ DIOCGETSTATESV2_full:
 					error = E2BIG;	/* more than one state */
 				} else {
 					sk = state->key[sidx];
-					PF_ACPY(&pnl->rsaddr, &sk->addr[sidx], sk->af);
+					pf_addrcpy(&pnl->rsaddr,
+					    &sk->addr[sidx], sk->af);
 					pnl->rsport = sk->port[sidx];
-					PF_ACPY(&pnl->rdaddr, &sk->addr[didx], sk->af);
+					pf_addrcpy(&pnl->rdaddr,
+					    &sk->addr[didx], sk->af);
 					pnl->rdport = sk->port[didx];
 					PF_STATE_UNLOCK(state);
 				}
@@ -4607,7 +4610,7 @@ DIOCGETSTATESV2_full:
 		}
 
 		pool->cur = TAILQ_FIRST(&pool->list);
-		PF_ACPY(&pool->counter, &pool->cur->addr.v.a.addr, pca->af);
+		pf_addrcpy(&pool->counter, &pool->cur->addr.v.a.addr, pca->af);
 		PF_RULES_WUNLOCK();
 		break;
 
@@ -5867,6 +5870,8 @@ pf_getstatus(struct pfioc_nv *nv)
 	char *pf_reasons[PFRES_MAX+1] = PFRES_NAMES;
 	char *pf_lcounter[KLCNT_MAX+1] = KLCNT_NAMES;
 	char *pf_fcounter[FCNT_MAX+1] = FCNT_NAMES;
+	time_t since;
+
 	PF_RULES_RLOCK_TRACKER;
 
 #define ERROUT(x)      ERROUT_FUNCTION(errout, x)
@@ -5877,8 +5882,10 @@ pf_getstatus(struct pfioc_nv *nv)
 	if (nvl == NULL)
 		ERROUT(ENOMEM);
 
+	since = time_second - (time_uptime - V_pf_status.since);
+
 	nvlist_add_bool(nvl, "running", V_pf_status.running);
-	nvlist_add_number(nvl, "since", V_pf_status.since);
+	nvlist_add_number(nvl, "since", since);
 	nvlist_add_number(nvl, "debug", V_pf_status.debug);
 	nvlist_add_number(nvl, "hostid", V_pf_status.hostid);
 	nvlist_add_number(nvl, "states", V_pf_status.states);
@@ -6021,11 +6028,11 @@ pf_kill_srcnodes(struct pfioc_src_node_kill *psnk)
 		PF_HASHROW_LOCK(sh);
 		LIST_FOREACH_SAFE(sn, &sh->nodes, entry, tmp)
 			if (psnk == NULL ||
-			    (PF_MATCHA(psnk->psnk_src.neg,
+			    (pf_match_addr(psnk->psnk_src.neg,
 			      &psnk->psnk_src.addr.v.a.addr,
 			      &psnk->psnk_src.addr.v.a.mask,
 			      &sn->addr, sn->af) &&
-			    PF_MATCHA(psnk->psnk_dst.neg,
+			    pf_match_addr(psnk->psnk_dst.neg,
 			      &psnk->psnk_dst.addr.v.a.addr,
 			      &psnk->psnk_dst.addr.v.a.mask,
 			      &sn->raddr, sn->af))) {
@@ -6129,10 +6136,10 @@ relock_DIOCCLRSTATES:
 
 				match_key.af = s->key[idx]->af;
 				match_key.proto = s->key[idx]->proto;
-				PF_ACPY(&match_key.addr[0],
+				pf_addrcpy(&match_key.addr[0],
 				    &s->key[idx]->addr[1], match_key.af);
 				match_key.port[0] = s->key[idx]->port[1];
-				PF_ACPY(&match_key.addr[1],
+				pf_addrcpy(&match_key.addr[1],
 				    &s->key[idx]->addr[0], match_key.af);
 				match_key.port[1] = s->key[idx]->port[0];
 			}

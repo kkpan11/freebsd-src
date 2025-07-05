@@ -179,11 +179,16 @@ main(int argc, char *argv[])
 		target = dot;
 	} else if ((sep = strrchr(target, '/')) != NULL && sep[1] == '\0') {
 		have_trailing_slash = true;
-		while (sep > target + 1 && *(sep - 1) == '/')
+		while (sep > target && *sep == '/')
 			sep--;
-		*sep = '\0';
+		sep[1] = '\0';
 	}
-	if (strlcpy(to.base, target, sizeof(to.base)) >= sizeof(to.base))
+	/*
+	 * Copy target into to.base, leaving room for a possible separator
+	 * which will be appended later in the non-FILE_TO_FILE cases.
+	 */
+	if (strlcpy(to.base, target, sizeof(to.base) - 1) >=
+	    sizeof(to.base) - 1)
 		errc(1, ENAMETOOLONG, "%s", target);
 
 	/* Set end of argument list for fts(3). */
@@ -264,11 +269,10 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 	struct stat created_root_stat, to_stat, *curr_stat;
 	FTS *ftsp;
 	FTSENT *curr;
-	char *recpath = NULL;
-	int atflags, dne, badcp, len, rval;
+	char *recpath = NULL, *sep;
+	int atflags, dne, badcp, len, level, rval;
 	mode_t mask, mode;
 	bool beneath = Rflag && type != FILE_TO_FILE;
-	bool skipdp = false;
 
 	/*
 	 * Keep an inverted copy of the umask, for use in correcting
@@ -280,13 +284,27 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 	if (type == FILE_TO_FILE) {
 		to.dir = AT_FDCWD;
 		to.end = to.path + strlcpy(to.path, to.base, sizeof(to.path));
-		strlcpy(to.base, dot, sizeof(to.base));
+		to.base[0] = '\0';
 	} else if (type == FILE_TO_DIR) {
 		to.dir = open(to.base, O_DIRECTORY | O_SEARCH);
 		if (to.dir < 0)
 			err(1, "%s", to.base);
+		/*
+		 * We have previously made sure there is room for this.
+		 */
+		if (strcmp(to.base, "/") != 0) {
+			sep = strchr(to.base, '\0');
+			sep[0] = '/';
+			sep[1] = '\0';
+		}
+	} else {
+		/*
+		 * We will create the destination directory imminently.
+		 */
+		to.dir = -1;
 	}
 
+	level = FTS_ROOTLEVEL;
 	if ((ftsp = fts_open(argv, fts_options, NULL)) == NULL)
 		err(1, "fts_open");
 	for (badcp = rval = 0;
@@ -297,6 +315,20 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 		case FTS_NS:
 		case FTS_DNR:
 		case FTS_ERR:
+			if (level > curr->fts_level) {
+				/* leaving a directory; remove its name from to.path */
+				if (type == DIR_TO_DNE &&
+				    curr->fts_level == FTS_ROOTLEVEL) {
+					/* this is actually our created root */
+				} else {
+					while (to.end > to.path && *to.end != '/')
+						to.end--;
+					assert(strcmp(to.end + (*to.end == '/'),
+					    curr->fts_name) == 0);
+					*to.end = '\0';
+				}
+				level--;
+			}
 			warnc(curr->fts_errno, "%s", curr->fts_path);
 			badcp = rval = 1;
 			continue;
@@ -317,14 +349,6 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 				strlcpy(rootname, curr->fts_name,
 				    sizeof(rootname));
 			}
-			/*
-			 * If we FTS_SKIP while handling FTS_D, we will
-			 * immediately get FTS_DP for the same directory.
-			 * If this happens before we've appended the name
-			 * to to.path, we need to remember not to perform
-			 * the reverse operation.
-			 */
-			skipdp = true;
 			/* we must have a destination! */
 			if (type == DIR_TO_DNE &&
 			    curr->fts_level == FTS_ROOTLEVEL) {
@@ -370,13 +394,20 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 					umask(~mask);
 				root_stat = &created_root_stat;
 				curr->fts_number = 1;
+				/*
+				 * We have previously made sure there is
+				 * room for this.
+				 */
+				sep = strchr(to.base, '\0');
+				sep[0] = '/';
+				sep[1] = '\0';
 			} else {
 				/* entering a directory; append its name to to.path */
 				len = snprintf(to.end, END(to.path) - to.end, "%s%s",
 				    to.end > to.path ? "/" : "", curr->fts_name);
 				if (to.end + len >= END(to.path)) {
 					*to.end = '\0';
-					warnc(ENAMETOOLONG, "%s/%s%s%s", to.base,
+					warnc(ENAMETOOLONG, "%s%s%s%s", to.base,
 					    to.path, to.end > to.path ? "/" : "",
 					    curr->fts_name);
 					fts_set(ftsp, curr, FTS_SKIP);
@@ -385,7 +416,7 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 				}
 				to.end += len;
 			}
-			skipdp = false;
+			level++;
 			/*
 			 * We're on the verge of recursing on ourselves.
 			 * Either we need to stop right here (we knowingly
@@ -448,22 +479,23 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 				const char *path = *to.path ? to.path : dot;
 				mode = curr_stat->st_mode;
 				if (fchmodat(to.dir, path, mode & mask, 0) != 0) {
-					warn("chmod: %s/%s", to.base, to.path);
+					warn("chmod: %s%s", to.base, to.path);
 					rval = 1;
 				}
 			}
-			/* are we leaving a directory we failed to enter? */
-			if (skipdp)
-				continue;
-			/* leaving a directory; remove its name from to.path */
-			if (type == DIR_TO_DNE &&
-			    curr->fts_level == FTS_ROOTLEVEL) {
-				/* this is actually our created root */
-			} else {
-				while (to.end > to.path && *to.end != '/')
-					to.end--;
-				assert(strcmp(to.end + (*to.end == '/'), curr->fts_name) == 0);
-				*to.end = '\0';
+			if (level > curr->fts_level) {
+				/* leaving a directory; remove its name from to.path */
+				if (type == DIR_TO_DNE &&
+				    curr->fts_level == FTS_ROOTLEVEL) {
+					/* this is actually our created root */
+				} else {
+					while (to.end > to.path && *to.end != '/')
+						to.end--;
+					assert(strcmp(to.end + (*to.end == '/'),
+					    curr->fts_name) == 0);
+					*to.end = '\0';
+				}
+				level--;
 			}
 			continue;
 		default:
@@ -474,7 +506,7 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 			    to.end > to.path ? "/" : "", curr->fts_name);
 			if (to.end + len >= END(to.path)) {
 				*to.end = '\0';
-				warnc(ENAMETOOLONG, "%s/%s%s%s", to.base,
+				warnc(ENAMETOOLONG, "%s%s%s%s", to.base,
 				    to.path, to.end > to.path ? "/" : "",
 				    curr->fts_name);
 				badcp = rval = 1;
@@ -506,7 +538,7 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 		if (!dne &&
 		    to_stat.st_dev == curr_stat->st_dev &&
 		    to_stat.st_ino == curr_stat->st_ino) {
-			warnx("%s/%s and %s are identical (not copied).",
+			warnx("%s%s and %s are identical (not copied).",
 			    to.base, to.path, curr->fts_path);
 			badcp = rval = 1;
 			if (S_ISDIR(curr_stat->st_mode))
@@ -558,7 +590,7 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 				if (~mask & S_IRWXU)
 					umask(~mask & ~S_IRWXU);
 				if (mkdirat(to.dir, to.path, mode) != 0) {
-					warn("%s/%s", to.base, to.path);
+					warn("%s%s", to.base, to.path);
 					fts_set(ftsp, curr, FTS_SKIP);
 					badcp = rval = 1;
 					if (~mask & S_IRWXU)
@@ -568,7 +600,7 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 				if (~mask & S_IRWXU)
 					umask(~mask);
 			} else if (!S_ISDIR(to_stat.st_mode)) {
-				warnc(ENOTDIR, "%s/%s", to.base, to.path);
+				warnc(ENOTDIR, "%s%s", to.base, to.path);
 				fts_set(ftsp, curr, FTS_SKIP);
 				badcp = rval = 1;
 				break;
@@ -611,12 +643,14 @@ copy(char *argv[], enum op type, int fts_options, struct stat *root_stat)
 			break;
 		}
 		if (vflag && !badcp)
-			(void)printf("%s -> %s/%s\n", curr->fts_path, to.base, to.path);
+			(void)printf("%s -> %s%s\n", curr->fts_path, to.base, to.path);
 	}
+	assert(level == FTS_ROOTLEVEL);
 	if (errno)
 		err(1, "fts_read");
-	fts_close(ftsp);
-	close(to.dir);
+	(void)fts_close(ftsp);
+	if (to.dir != AT_FDCWD && to.dir >= 0)
+		(void)close(to.dir);
 	free(recpath);
 	return (rval);
 }
